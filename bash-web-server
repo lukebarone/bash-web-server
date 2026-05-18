@@ -168,7 +168,7 @@ normalize-path() {
 parse-request() {
 	declare -gA REQ_INFO=()
 	declare -gA REQ_HEADERS=()
-	
+
 	local state='status'
 	local line
 	while read -r line; do
@@ -255,7 +255,7 @@ process-request() {
 			break
 		fi
 	done
-	
+
 	if [[ -n $file ]]; then
 		# a static file was found!
 		local mime
@@ -343,7 +343,7 @@ main() {
 	done
 
 	cd "$DIR" || fatal "failed to move to $DIR"
-	
+
 	echo "listening on http://$ADDRESS:$PORT"
 	echo "serving out of $PWD"
 
