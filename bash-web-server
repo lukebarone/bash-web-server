@@ -30,6 +30,7 @@ Options
   -v         Print the version number and exit.
 EOF
 
+declare -a redirects paths urls
 fatal() {
 	echo '[fatal]' "$@" >&2
 	exit 1
@@ -297,35 +298,15 @@ process-request() {
 		printf '\r\n' >&"$fd"
 	fi
 }
-
-main() {
-	enable accept || fatal 'failed to load accept'
-	enable tee # fallback to POSIX tee if not loadable
-
-	local OPTIND OPTARG opt
-	while getopts 'b:hp:d:vr' opt; do
-		case "$opt" in
-			b) ADDRESS=$OPTARG;;
-			p) PORT=$OPTARG;;
-			d) DIR=$OPTARG;;
-			h) echo "$USAGE"; exit 0;;
-			v) echo "$VERSION"; exit 0;;
-			r) REDIRECTS=1;;
-			*) echo "$USAGE" >&2; exit 2;;
-		esac
-	done
-
-	cd "$DIR" || fatal "failed to move to $DIR"
-	if [[ -n $REDIRECTS ]] && [[ -f redirects.txt ]]; then
+parse-redirects() {
+	if [[ -n $REDIRECTS && -f redirects.txt ]]; then
 		# Redirects file found; try to read it
-		declare -a redirects
 		readarray -t redirects < redirects.txt || fatal 'redirects.txt not loadable'
-		declare -a paths urls
 		local linenumber=0
 		local redirects_regex='^[[:alpha:]]+\=[[:alpha:]]+'
 		for line in "${redirects[@]}"; do
 			if [[ ! $line =~ $redirects_regex ]]; then
-				echo "Skipping line $line due to bad formatting"
+				echo "Skipping line '$line' due to bad formatting"
 				continue
 			fi
 			while IFS='=' read -r path url; do
@@ -339,7 +320,30 @@ main() {
 				echo "${paths[i]} points to ${urls[i]}"
 			fi
 		done
+		[[ ${#paths[*]} -eq 0 ]] && fatal "No valid redirects found in file"
+	elif [[ -n $REDIRECTS && ! -f redirects.txt ]]; then
+		echo "redirects.txt file not found - ignoring -r switch"
 	fi
+}
+main() {
+	enable accept || fatal 'failed to load accept'
+	enable tee # fallback to POSIX tee if not loadable
+
+	local OPTIND OPTARG opt
+	while getopts 'b:hp:d:vr' opt; do
+		case "$opt" in
+			b) ADDRESS=$OPTARG;;
+			p) PORT=$OPTARG;;
+			d) DIR=$OPTARG;;
+			h) echo "$USAGE"; exit 0;;
+			v) echo "$VERSION"; exit 0;;
+			r) REDIRECTS=1; parse-redirects;;
+			*) echo "$USAGE" >&2; exit 2;;
+		esac
+	done
+
+	cd "$DIR" || fatal "failed to move to $DIR"
+	
 	echo "listening on http://$ADDRESS:$PORT"
 	echo "serving out of $PWD"
 
