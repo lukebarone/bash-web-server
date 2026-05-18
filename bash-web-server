@@ -8,8 +8,9 @@
 # Author: Dave Eddy <dave@daveeddy.com>
 # Date: July 08, 2025
 # License: MIT
+# v1.0.3 - Authored by Luke Barone <lukebarone@gmail.com>
 
-VERSION='v1.0.2'
+VERSION='v1.0.3'
 
 PORT=8080
 ADDRESS='0.0.0.0'
@@ -25,6 +26,7 @@ Options
   -d <dir>   Directory to serve, defaults to your current directory.
   -h         Print this message and exit.
   -p <port>  Port to bind to, defaults to 8080.
+  -r         Enable redirects (needs redirects.txt file in PWD)
   -v         Print the version number and exit.
 EOF
 
@@ -165,7 +167,7 @@ normalize-path() {
 parse-request() {
 	declare -gA REQ_INFO=()
 	declare -gA REQ_HEADERS=()
-
+	
 	local state='status'
 	local line
 	while read -r line; do
@@ -252,7 +254,7 @@ process-request() {
 			break
 		fi
 	done
-
+	
 	if [[ -n $file ]]; then
 		# a static file was found!
 		local mime
@@ -276,6 +278,19 @@ process-request() {
 		printf 'Content-Type: text/html; charset=utf-8\r\n' >&"$fd"
 		printf '\r\n' >&"$fd"
 		list-directory "$path" >&"$fd"
+	elif [[ -n $REDIRECTS && ${#paths[@]} -gt 0 && ${#urls[@]} -gt 0 ]]; then
+		# Try to redirect
+		if [[ "${paths[*]}" =~ ${path} ]]; then
+			for i in "${!paths[@]}"; do
+				if [[ "${paths[$i]}" == "${path}" ]]; then
+					break
+				fi
+			done
+			printf 'HTTP/1.1 307 Temporary Redirect\r\n' >&"$fd"
+			printf 'Location: %s/\r\n' "${urls[$i]}" >&"$fd"
+			printf '\r\n' >&"$fd"
+			return
+		fi
 	else
 		# nothing was found
 		printf 'HTTP/1.1 404 Not Found\r\n' >&"$fd"
@@ -288,19 +303,43 @@ main() {
 	enable tee # fallback to POSIX tee if not loadable
 
 	local OPTIND OPTARG opt
-	while getopts 'b:hp:d:v' opt; do
+	while getopts 'b:hp:d:vr' opt; do
 		case "$opt" in
 			b) ADDRESS=$OPTARG;;
 			p) PORT=$OPTARG;;
 			d) DIR=$OPTARG;;
 			h) echo "$USAGE"; exit 0;;
 			v) echo "$VERSION"; exit 0;;
+			r) REDIRECTS=1;;
 			*) echo "$USAGE" >&2; exit 2;;
 		esac
 	done
 
 	cd "$DIR" || fatal "failed to move to $DIR"
-
+	if [[ -n $REDIRECTS ]] && [[ -f redirects.txt ]]; then
+		# Redirects file found; try to read it
+		declare -a redirects
+		readarray -t redirects < redirects.txt || fatal 'redirects.txt not loadable'
+		declare -a paths urls
+		local linenumber=0
+		local redirects_regex='^[[:alpha:]]+\=[[:alpha:]]+'
+		for line in "${redirects[@]}"; do
+			if [[ ! $line =~ $redirects_regex ]]; then
+				echo "Skipping line $line due to bad formatting"
+				continue
+			fi
+			while IFS='=' read -r path url; do
+				((linenumber++))
+				paths[linenumber]="$path"
+				urls[linenumber]="$url"
+			done <<< "$line"
+		done 
+		for i in "${!paths[@]}"; do
+			if [[ -n ${paths[i]} ]]; then
+				echo "${paths[i]} points to ${urls[i]}"
+			fi
+		done
+	fi
 	echo "listening on http://$ADDRESS:$PORT"
 	echo "serving out of $PWD"
 
